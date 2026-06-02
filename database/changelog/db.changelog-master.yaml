@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - include:
+      file: sql/001-create-products.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/002-create-promotions.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/003-create-coupons.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/004-create-orders.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/005-create-order-items.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/006-seed-data.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/007-add-coupon-usage-limits.sql
+      relativeToChangelogFile: true
+  - include:
+      file: sql/008-add-promotion-query-index.sql
+      relativeToChangelogFile: true

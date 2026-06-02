@@ -37,6 +37,8 @@ public class CouponService {
         coupon.setDiscountAmount(request.getDiscountAmount());
         coupon.setActive(request.getActive());
         coupon.setExpiryDate(request.getExpiryDate());
+        coupon.setMaxUsage(request.getMaxUsage());
+        coupon.setUsageCount(0);
         return toResponse(couponRepository.save(coupon));
     }
 
@@ -56,6 +58,6 @@ public class CouponService {
     private CouponResponse toResponse(Coupon c) {
         return new CouponResponse(
                 c.getCode(), c.getDiscountAmount(), c.getActive(),
-                c.getExpiryDate(), c.getCreatedAt());
+                c.getExpiryDate(), c.getMaxUsage(), c.getUsageCount(), c.getCreatedAt());
     }
 }

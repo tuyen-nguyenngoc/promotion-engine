@@ -3,32 +3,31 @@ package com.example.promotionengine.config;
 import com.example.promotionengine.domain.chain.PromotionHandler;
 import com.example.promotionengine.domain.chain.PromotionPipeline;
 import com.example.promotionengine.domain.chain.StrategyPromotionHandler;
-import com.example.promotionengine.domain.strategy.Buy2Get1FreeStrategy;
-import com.example.promotionengine.domain.strategy.CouponDiscountStrategy;
-import com.example.promotionengine.domain.strategy.PercentageDiscountStrategy;
-import com.example.promotionengine.domain.strategy.VipDiscountStrategy;
+import com.example.promotionengine.domain.strategy.PromotionStrategy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
+
 /**
  * Wires the Chain of Responsibility pipeline.
- * Order: Percentage → Buy2Get1Free → VIP → Coupon
+ * Order is controlled by @Order on each PromotionStrategy bean.
  * All discounts are calculated independently against the original subtotal.
  */
 @Configuration
 public class PromotionPipelineConfig {
 
     @Bean
-    public PromotionPipeline promotionPipeline(
-            PercentageDiscountStrategy percentageDiscountStrategy,
-            Buy2Get1FreeStrategy buy2Get1FreeStrategy,
-            VipDiscountStrategy vipDiscountStrategy,
-            CouponDiscountStrategy couponDiscountStrategy) {
+    public PromotionPipeline promotionPipeline(List<PromotionStrategy> strategies) {
+        if (strategies.isEmpty()) {
+            throw new IllegalStateException("At least one PromotionStrategy is required");
+        }
 
-        PromotionHandler head = new StrategyPromotionHandler(percentageDiscountStrategy);
-        head.setNext(new StrategyPromotionHandler(vipDiscountStrategy))
-            .setNext(new StrategyPromotionHandler(couponDiscountStrategy))
-            .setNext(new StrategyPromotionHandler(buy2Get1FreeStrategy));
+        PromotionHandler head = new StrategyPromotionHandler(strategies.get(0));
+        PromotionHandler current = head;
+        for (int i = 1; i < strategies.size(); i++) {
+            current = current.setNext(new StrategyPromotionHandler(strategies.get(i)));
+        }
 
         return new PromotionPipeline(head);
     }

@@ -3,6 +3,7 @@ package com.example.promotionengine.domain.strategy;
 import com.example.promotionengine.domain.model.DiscountDetail;
 import com.example.promotionengine.domain.model.OrderContext;
 import com.example.promotionengine.dto.request.OrderItemRequest;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -13,6 +14,7 @@ import java.util.Optional;
  * Formula: freeUnits = floor(qty / 2), discount = freeUnits × unitPrice (per SKU, summed).
  */
 @Component
+@Order(40)
 public class Buy2Get1FreeStrategy implements PromotionStrategy {
 
     private static final String TYPE = "BUY2_GET1_FREE";

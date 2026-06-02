@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -16,8 +18,16 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -37,6 +47,11 @@ class OrderCalculateIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.liquibase.enabled", () -> "true");
+        registry.add("spring.liquibase.change-log", () -> Paths.get("database/changelog/db.changelog-master.yaml")
+                .toAbsolutePath()
+                .toUri()
+                .toString());
     }
 
     @Autowired
@@ -44,6 +59,9 @@ class OrderCalculateIntegrationTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private OrderItemRequest item(String sku, double price, int qty) {
         OrderItemRequest r = new OrderItemRequest();
@@ -97,5 +115,57 @@ class OrderCalculateIntegrationTest {
                 .andExpect(jsonPath("$.data.subtotal").value(200.00))
                 .andExpect(jsonPath("$.data.finalPrice").value(80.00))
                 .andExpect(jsonPath("$.data.discounts.length()").value(2));
+    }
+
+    @Test
+    void calculate_concurrentLimitedCouponRedemption_allowsExactlyOneRequest() throws Exception {
+        OrderCalculateRequest request = new OrderCalculateRequest();
+        request.setCustomerType("REGULAR");
+        request.setItems(List.of(item("A100", 100, 1)));
+        request.setCouponCode("SAVE20");
+
+        String payload = objectMapper.writeValueAsString(request);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        Callable<CalculationResult> task = () -> {
+            ready.countDown();
+            start.await();
+            MvcResult result = mockMvc.perform(post("/api/v1/orders/calculate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(payload))
+                    .andReturn();
+            return new CalculationResult(
+                    result.getResponse().getStatus(),
+                    result.getResponse().getContentAsString()
+            );
+        };
+
+        List<Future<CalculationResult>> futures = new ArrayList<>();
+        futures.add(executor.submit(task));
+        futures.add(executor.submit(task));
+        ready.await();
+        start.countDown();
+
+        List<CalculationResult> results = List.of(futures.get(0).get(), futures.get(1).get());
+        executor.shutdown();
+
+        assertThat(results).extracting(CalculationResult::status)
+                .containsExactlyInAnyOrder(200, 400);
+        assertThat(results.stream()
+                .filter(result -> result.status() == 400)
+                .findFirst()
+                .orElseThrow()
+                .body()).contains("COUPON_USAGE_LIMIT_REACHED");
+
+        Integer usageCount = jdbcTemplate.queryForObject(
+                "SELECT usage_count FROM coupons WHERE code = 'SAVE20'",
+                Integer.class
+        );
+        assertThat(usageCount).isEqualTo(1);
+    }
+
+    private record CalculationResult(int status, String body) {
     }
 }

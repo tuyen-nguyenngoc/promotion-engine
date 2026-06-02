@@ -65,17 +65,26 @@ public class OrderService {
         // 5. Execute pipeline
         List<DiscountDetail> discounts = promotionPipeline.process(context);
 
-        // 6. Total discount
+        // 6. Atomically redeem limited-use coupon under concurrent requests
+        if (coupon != null) {
+            int redeemed = couponRepository.redeemIfAvailable(coupon.getCode());
+            if (redeemed == 0) {
+                throw new BusinessException("COUPON_USAGE_LIMIT_REACHED",
+                        "Coupon '" + coupon.getCode() + "' has reached its usage limit");
+            }
+        }
+
+        // 7. Total discount
         BigDecimal totalDiscount = discounts.stream()
                 .map(DiscountDetail::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // 7. Final price — clamp to 0
+        // 8. Final price — clamp to 0
         BigDecimal finalPrice = subtotal.subtract(totalDiscount)
                 .max(BigDecimal.ZERO)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        // 8. Persist order
+        // 9. Persist order
         Order order = new Order();
         order.setCustomerType(request.getCustomerType());
         order.setSubtotal(subtotal.setScale(2, RoundingMode.HALF_UP));
@@ -93,7 +102,7 @@ public class OrderService {
         order.setItems(orderItems);
         orderRepository.save(order);
 
-        // 9. Build response
+        // 10. Build response
         List<OrderCalculateResponse.DiscountDetailResponse> discountResponses = discounts.stream()
                 .map(d -> new OrderCalculateResponse.DiscountDetailResponse(d.getType(), d.getAmount()))
                 .collect(Collectors.toList());

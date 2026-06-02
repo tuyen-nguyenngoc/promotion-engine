@@ -63,6 +63,7 @@ class OrderServiceTest {
         coupon.setActive(true);
         coupon.setExpiryDate(LocalDate.of(2099, 12, 31));
         when(couponRepository.findByCode("SUMMER10")).thenReturn(Optional.of(coupon));
+        when(couponRepository.redeemIfAvailable("SUMMER10")).thenReturn(1);
 
         List<DiscountDetail> mockDiscounts = List.of(
                 new DiscountDetail("PERCENTAGE_DISCOUNT", BigDecimal.valueOf(25)),
@@ -79,6 +80,7 @@ class OrderServiceTest {
         assertThat(response.getTotalDiscount()).isEqualByComparingTo("147.50");
         assertThat(response.getFinalPrice()).isEqualByComparingTo("102.50");
         verify(orderRepository).save(any(Order.class));
+        verify(couponRepository).redeemIfAvailable("SUMMER10");
     }
 
     @Test
@@ -94,5 +96,31 @@ class OrderServiceTest {
         assertThatThrownBy(() -> orderService.calculate(request))
                 .isInstanceOf(BusinessException.class)
                 .extracting("code").isEqualTo("INVALID_COUPON");
+        verify(couponRepository, never()).redeemIfAvailable(any());
+    }
+
+    @Test
+    void calculate_couponUsageLimitReached_throwsBusinessException() {
+        OrderCalculateRequest request = new OrderCalculateRequest();
+        request.setCustomerType("VIP");
+        request.setItems(List.of(item("A100", 100, 1)));
+        request.setCouponCode("SAVE20");
+
+        when(promotionRepository.findByActiveTrue()).thenReturn(List.of());
+        Coupon coupon = new Coupon();
+        coupon.setCode("SAVE20");
+        coupon.setDiscountAmount(BigDecimal.valueOf(20));
+        coupon.setActive(true);
+        coupon.setExpiryDate(LocalDate.of(2099, 12, 31));
+        when(couponRepository.findByCode("SAVE20")).thenReturn(Optional.of(coupon));
+        when(promotionPipeline.process(any())).thenReturn(List.of(
+                new DiscountDetail("COUPON_SAVE20", BigDecimal.valueOf(20))
+        ));
+        when(couponRepository.redeemIfAvailable("SAVE20")).thenReturn(0);
+
+        assertThatThrownBy(() -> orderService.calculate(request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("code").isEqualTo("COUPON_USAGE_LIMIT_REACHED");
+        verify(orderRepository, never()).save(any());
     }
 }
