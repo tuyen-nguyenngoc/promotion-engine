@@ -34,8 +34,9 @@ com.example.promotionengine/
 3. Builds an `OrderContext` (immutable data bag)
 4. Passes context through `PromotionPipeline` → list of `DiscountDetail`
 5. Calculates `totalDiscount` and `finalPrice` (clamped to ≥ 0)
-6. Persists the order snapshot to DB
-7. Returns `ApiResponse<OrderCalculateResponse>`
+6. Atomically redeems limited-use coupons inside the order transaction
+7. Persists the order snapshot to DB
+8. Returns `ApiResponse<OrderCalculateResponse>`
 
 ---
 
@@ -48,12 +49,12 @@ com.example.promotionengine/
 - `VipDiscountStrategy` — 5% extra for VIP customers only
 - `CouponDiscountStrategy` — flat amount from the `coupons` table
 
-Each rule is a completely self-contained class. Adding a new rule means **only** creating a new class that implements `PromotionStrategy` — zero changes to existing code (Open/Closed Principle).
+Each rule is a self-contained Spring bean. Adding a new rule means creating a class that implements `PromotionStrategy` and assigning an `@Order` value to place it in the pipeline (Open/Closed Principle).
 
 ### Chain of Responsibility
 **Files:** `domain/chain/PromotionHandler.java`, `StrategyPromotionHandler.java`, `PromotionPipeline.java`, `config/PromotionPipelineConfig.java`
 
-Each `StrategyPromotionHandler` wraps a `PromotionStrategy` and passes control to the next node. The `PromotionPipeline` holds the head of the chain and collects all discount results. Chain order (PERCENTAGE → VIP → COUPON → BUY2GET1FREE) is configured once in `PromotionPipelineConfig` via Spring `@Bean` wiring.
+Each `StrategyPromotionHandler` wraps a `PromotionStrategy` and passes control to the next node. The `PromotionPipeline` holds the head of the chain and collects all discount results. Chain order (PERCENTAGE → VIP → COUPON → BUY2GET1FREE) is controlled by Spring `@Order` on each strategy bean.
 
 ---
 
@@ -75,7 +76,7 @@ Each `StrategyPromotionHandler` wraps a `PromotionStrategy` and passes control t
 |-------|---------|
 | `products` | Catalogue (SKU, name, price). Present per spec; price lookup not used in calculate (price comes from request) |
 | `promotions` | Rule type, percentage/flat value, active flag. `value` is nullable (BUY2_GET1_FREE has no fixed value) |
-| `coupons` | Code (PK), flat discount, active flag, expiry date. Separate table for date-based expiry logic |
+| `coupons` | Code (PK), flat discount, active flag, expiry date, optional usage limit, current usage count |
 | `orders` | Snapshot of each calculation — subtotal, total discount, final price, customer type |
 | `order_items` | Line items per order snapshot |
 
@@ -83,7 +84,8 @@ Each `StrategyPromotionHandler` wraps a `PromotionStrategy` and passes control t
 - `promotions.value` is `NULLABLE` because `BUY2_GET1_FREE` calculates from item price, not a stored percentage
 - No unique constraint on `promotions.type` — allows multiple versions (e.g., seasonal % changes); only `active=true` rows are used
 - `orders` stores a snapshot so historical pricing is preserved even if promotions change later
-- `coupons` has its own table because it has extra fields (`expiry_date`, unique `code` PK) that don't fit `promotions`
+- `coupons` has its own table because it has extra fields (`expiry_date`, unique `code` PK, `max_usage`, `usage_count`) that don't fit `promotions`
+- Limited-use coupons are redeemed with a single atomic database update inside the order transaction, so concurrent requests cannot over-redeem the same coupon
 
 ---
 
@@ -97,7 +99,19 @@ cd promotion-engine
 docker compose up
 ```
 
-The service will be available at `http://localhost:8080`. Liquibase runs automatically on startup and seeds the three default promotions (`PERCENTAGE_DISCOUNT 10%`, `BUY2_GET1_FREE`, `VIP_DISCOUNT 5%`) and two coupons (`SUMMER10`, `SAVE20`).
+The service will be available at `http://localhost:8080`. `docker compose` starts PostgreSQL, runs the dedicated `database` migration image once, then starts the application. The migration seeds the three default promotions (`PERCENTAGE_DISCOUNT 10%`, `BUY2_GET1_FREE`, `VIP_DISCOUNT 5%`) and two coupons (`SUMMER10`, `SAVE20`). `SUMMER10` is unlimited; `SAVE20` is limited to one redemption to demonstrate concurrency safety.
+
+**Build and run the migration image separately:**
+```bash
+docker build -t promotion-engine-db-migrations ./database
+docker run --rm \
+  -e LIQUIBASE_COMMAND_URL=jdbc:postgresql://host.docker.internal:5432/promotiondb \
+  -e LIQUIBASE_COMMAND_USERNAME=user \
+  -e LIQUIBASE_COMMAND_PASSWORD=password \
+  promotion-engine-db-migrations
+```
+
+The application disables Liquibase by default (`SPRING_LIQUIBASE_ENABLED=false`) so production can run migrations through a deployment job before starting the service.
 
 ### API Endpoints
 
@@ -178,8 +192,8 @@ curl http://localhost:8080/api/v1/coupons
 ```json
 {
   "data": [
-    { "code": "SUMMER10", "discountAmount": 10.00, "active": true, "expiryDate": "2099-12-31", "createdAt": "..." },
-    { "code": "SAVE20",   "discountAmount": 20.00, "active": true, "expiryDate": "2099-12-31", "createdAt": "..." }
+    { "code": "SUMMER10", "discountAmount": 10.00, "active": true, "expiryDate": "2099-12-31", "maxUsage": null, "usageCount": 0, "createdAt": "..." },
+    { "code": "SAVE20",   "discountAmount": 20.00, "active": true, "expiryDate": "2099-12-31", "maxUsage": 1, "usageCount": 0, "createdAt": "..." }
   ],
   "error": null
 }
@@ -193,19 +207,20 @@ curl -X POST http://localhost:8080/api/v1/coupons \
     "code": "WINTER30",
     "discountAmount": 30,
     "active": true,
-    "expiryDate": "2026-12-31"
+    "expiryDate": "2026-12-31",
+    "maxUsage": 100
   }'
 ```
 
 ```json
 {
-  "data": { "code": "WINTER30", "discountAmount": 30.00, "active": true, "expiryDate": "2026-12-31", "createdAt": "..." },
+  "data": { "code": "WINTER30", "discountAmount": 30.00, "active": true, "expiryDate": "2026-12-31", "maxUsage": 100, "usageCount": 0, "createdAt": "..." },
   "error": null
 }
 ```
 
 > **Note:** `code` is case-sensitive and stored exactly as provided. Creating a duplicate code returns `409 COUPON_ALREADY_EXISTS`.
-> `expiryDate` is optional — if omitted, the coupon never expires.
+> `expiryDate` is optional — if omitted, the coupon never expires. `maxUsage` is optional — if omitted, the coupon can be redeemed unlimited times.
 
 **PATCH /api/v1/promotions/{id}/deactivate** — Deactivate a promotion by ID:
 ```bash
@@ -224,7 +239,7 @@ curl -X PATCH http://localhost:8080/api/v1/coupons/SUMMER10/deactivate
 ```
 
 ```json
-{ "data": { "code": "SUMMER10", "discountAmount": 10.00, "active": false, "expiryDate": "2099-12-31", "createdAt": "..." }, "error": null }
+{ "data": { "code": "SUMMER10", "discountAmount": 10.00, "active": false, "expiryDate": "2099-12-31", "maxUsage": null, "usageCount": 0, "createdAt": "..." }, "error": null }
 ```
 
 > `{code}` is case-sensitive and must match exactly as stored. Returns `409 COUPON_ALREADY_INACTIVE` if already inactive.
@@ -243,7 +258,7 @@ curl -X PATCH http://localhost:8080/api/v1/coupons/SUMMER10/deactivate
 ./mvnw verify
 ```
 
-Testcontainers automatically spins up a PostgreSQL 16 container for integration tests. Liquibase seed data runs inside the test container, so no external database is needed.
+Testcontainers automatically spins up a PostgreSQL 16 container for integration tests. Tests explicitly enable Liquibase and point it at `file:./database/changelog/db.changelog-master.yaml`, so no external database is needed.
 
 ---
 
@@ -252,7 +267,7 @@ Testcontainers automatically spins up a PostgreSQL 16 container for integration 
 | Trade-off | Detail |
 |-----------|--------|
 | **Discounts are independent** | All rules calculate against the original subtotal, not a cascading remainder. This matches the assignment example but differs from some real-world engines where discount order matters. |
-| **No coupon usage tracking** | Coupons can be used unlimited times. A `coupon_usages` table with a usage limit would be the production fix. |
+| **Coupon usage is counter-based** | Limited-use coupons are protected by an atomic `usage_count` increment. A production audit trail could add a `coupon_usages` table keyed by coupon and order/customer. |
 | **No pagination on `GET /promotions`** | Dataset is expected to be small; a real system would add `Page<PromotionResponse>`. |
 | **`products` table exists but is unused in calculate** | Required by the spec. A real enhancement would validate that request SKUs exist in the products catalogue. |
 | **No authentication/authorisation** | Out of scope. In production, `POST /promotions` should require an admin role. |
@@ -268,4 +283,4 @@ Testcontainers automatically spins up a PostgreSQL 16 container for integration 
 | **Synchronous DB write on every calculate** | High RPS pricing lookups | Make the order-persistence step async (publish to a Kafka topic, write via consumer) |
 | **Testcontainers startup per test class** | Large test suite | Use a shared `@Container` with `@DynamicPropertySource` (already done) or a singleton container pattern |
 | **Single Spring Boot instance** | Horizontal scale | The service is stateless (no in-memory state between requests), so it scales horizontally with a load balancer; the only shared state is the DB |
-| **Coupon redemption race condition** | High coupon contention | Add `coupon_usages` with a `SELECT ... FOR UPDATE` or optimistic locking (`@Version`) to enforce usage limits atomically |
+| **Coupon redemption hot row** | High contention on one limited coupon | The current atomic update prevents over-redemption. At very high contention, shard coupon allocations or pre-allocate redemption tokens. |

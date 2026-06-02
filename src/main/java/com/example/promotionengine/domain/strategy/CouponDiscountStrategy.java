@@ -4,6 +4,7 @@ import com.example.promotionengine.domain.model.DiscountDetail;
 import com.example.promotionengine.domain.model.OrderContext;
 import com.example.promotionengine.entity.Coupon;
 import com.example.promotionengine.exception.BusinessException;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -15,6 +16,7 @@ import java.util.Optional;
  * Throws BusinessException(INVALID_COUPON) for invalid coupons (fail-fast behaviour).
  */
 @Component
+@Order(30)
 public class CouponDiscountStrategy implements PromotionStrategy {
 
     private static final String TYPE = "COUPON";

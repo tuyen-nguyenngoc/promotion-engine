@@ -17,5 +17,7 @@ public class CouponResponse {
     private BigDecimal discountAmount;
     private Boolean active;
     private LocalDate expiryDate;
+    private Integer maxUsage;
+    private Integer usageCount;
     private OffsetDateTime createdAt;
 }

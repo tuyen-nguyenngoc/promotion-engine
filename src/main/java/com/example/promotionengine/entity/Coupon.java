@@ -29,11 +29,18 @@ public class Coupon {
     @Column(name = "expiry_date")
     private LocalDate expiryDate;
 
+    @Column(name = "max_usage")
+    private Integer maxUsage;
+
+    @Column(name = "usage_count", nullable = false)
+    private Integer usageCount;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
     @PrePersist
     public void prePersist() {
         if (createdAt == null) createdAt = OffsetDateTime.now();
+        if (usageCount == null) usageCount = 0;
     }
 }

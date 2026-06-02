@@ -2,6 +2,7 @@ package com.example.promotionengine.domain.strategy;
 
 import com.example.promotionengine.domain.model.DiscountDetail;
 import com.example.promotionengine.domain.model.OrderContext;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -12,6 +13,7 @@ import java.util.Optional;
  * Strategy Pattern implementation — applies an extra percentage discount for VIP customers only.
  */
 @Component
+@Order(20)
 public class VipDiscountStrategy implements PromotionStrategy {
 
     private static final String TYPE = "VIP_DISCOUNT";

@@ -3,6 +3,7 @@ package com.example.promotionengine.domain.strategy;
 import com.example.promotionengine.domain.model.DiscountDetail;
 import com.example.promotionengine.domain.model.OrderContext;
 import com.example.promotionengine.entity.Promotion;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -14,6 +15,7 @@ import java.util.Optional;
  * Reads the percentage value from the active PERCENTAGE_DISCOUNT promotion record.
  */
 @Component
+@Order(10)
 public class PercentageDiscountStrategy implements PromotionStrategy {
 
     private static final String TYPE = "PERCENTAGE_DISCOUNT";

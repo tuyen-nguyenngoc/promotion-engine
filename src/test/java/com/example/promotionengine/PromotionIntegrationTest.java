@@ -15,6 +15,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.nio.file.Paths;
 
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -36,6 +37,11 @@ class PromotionIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.liquibase.enabled", () -> "true");
+        registry.add("spring.liquibase.change-log", () -> Paths.get("database/changelog/db.changelog-master.yaml")
+                .toAbsolutePath()
+                .toUri()
+                .toString());
     }
 
     @Autowired

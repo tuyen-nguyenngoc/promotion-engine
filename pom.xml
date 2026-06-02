@@ -19,7 +19,7 @@
 
   <properties>
     <java.version>17</java.version>
-    <testcontainers.version>1.19.7</testcontainers.version>
+    <testcontainers.version>1.21.3</testcontainers.version>
   </properties>
 
   <dependencies>
@@ -87,6 +87,18 @@
               <artifactId>lombok</artifactId>
             </exclude>
           </excludes>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Djdk.attach.allowAttachSelf=true</argLine>
+          <systemPropertyVariables>
+            <docker.client.strategy>org.testcontainers.dockerclient.EnvironmentAndSystemPropertyClientProviderStrategy</docker.client.strategy>
+            <docker.host>unix:///var/run/docker.sock</docker.host>
+            <api.version>1.40</api.version>
+          </systemPropertyVariables>
         </configuration>
       </plugin>
     </plugins>
