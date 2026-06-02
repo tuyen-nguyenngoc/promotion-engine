@@ -40,7 +40,7 @@ class OrderServiceTest {
 
     @BeforeEach
     void setUp() {
-        orderService = new OrderService(promotionRepository, couponRepository, orderRepository, promotionPipeline);
+        orderService = new OrderServiceImpl(promotionRepository, couponRepository, orderRepository, promotionPipeline);
     }
 
     private OrderItemRequest item(String sku, double price, int qty) {
